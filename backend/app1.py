@@ -32,11 +32,16 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your_default_jwt_sec
 
 # Load the ML Model
 try:
-    model = tf.keras.models.load_model("D:/BE/BE project flask api/Speech-Emotion-Recogniton/final_model.keras")
+    model = tf.keras.models.load_model("D:/BE/BE project flask api/Speech-Emotion-Recogniton/emotion_recognition_model.keras")
     print(model.summary())  # Debugging: Check if the model is loaded
+    # Print input shape
+    print("Model Input Shape:", model.input_shape)
 except Exception as e:
     print("❌ Error loading model:", str(e))
     model = None
+
+# Emotion categories
+emotions = ["neutral", "calm", "happy", "sad", "angry", "fear", "disgust", "surprise"]
 
 # Emotion categories and uplifting playlist mapping
 emotion_playlists = {
@@ -168,58 +173,49 @@ def login():
 
 
 # =========================== Process Audio  ===========================
-import soundfile as sf
-
-import subprocess
-import os
 import librosa
 import numpy as np
-import cv2
+import io
+import soundfile as sf
 
 def process_audio(file_stream):
     try:
-        print("🎤 Processing in-memory audio...")
+        print("🎤 Processing in-memory raw audio...")
 
-        # ✅ Save uploaded audio to a temporary file
-        temp_filename = "temp_audio.wav"
-        with open(temp_filename, "wb") as temp_audio:
-            temp_audio.write(file_stream.read())
+        # ✅ Read the uploaded audio file into memory
+        file_bytes = file_stream.read()
+        file_buffer = io.BytesIO(file_bytes)
 
-        # ✅ Debug: Check if file was saved properly
-        if not os.path.exists(temp_filename):
-            print("❌ Error: Temporary audio file not saved!")
-            return None
+        # ✅ Load the raw audio file directly from memory
+        y, sr = sf.read(file_buffer, dtype='float32')  
+        print(f"🔹 Loaded Audio: {len(y)} samples at {sr} Hz")
 
-        # ✅ Load the WAV file to check if Librosa can read it
-        try:
-            y, sr = librosa.load(temp_filename, sr=22050)
-            print(f"🔹 Audio loaded: {len(y)} samples, Sample Rate: {sr}")
-        except Exception as e:
-            print(f"❌ Librosa failed to load audio: {str(e)}")
-            return None
+        # ✅ Convert stereo to mono (if necessary)
+        if len(y.shape) > 1:
+            y = librosa.to_mono(y.T)  # Convert stereo to mono
 
-        # Ensure audio is not empty
-        if y is None or len(y) == 0:
-            print("❌ Error: Audio file is empty")
-            return None
+        # ✅ Normalize audio (ensure values are in the same range)
+        y = librosa.util.normalize(y)
 
-        # Convert to Mel Spectrogram
-        mel_spectrogram = librosa.feature.melspectrogram(y=y, sr=sr, n_mels=128, fmax=8000)
-        mel_spectrogram = librosa.power_to_db(mel_spectrogram, ref=np.max)
-        mel_spectrogram = (mel_spectrogram - np.mean(mel_spectrogram)) / np.std(mel_spectrogram)
+        # ✅ Ensure the audio length is exactly 309 samples
+        if len(y) < 309:
+            y = np.pad(y, (0, 309 - len(y)), mode='constant')  # Pad if too short
+        else:
+            y = y[:309]  # Trim if too long
 
-        # ✅ Resize spectrogram to match model input size
-        mel_spectrogram_resized = cv2.resize(mel_spectrogram, (383, 38))  # Make sure this matches model input
-        mel_spectrogram_resized = np.expand_dims(mel_spectrogram_resized, axis=(0, -1))  # Shape: (1, 383, 38, 1)
+        print(f"📏 Final Processed Audio Shape for Model: {y.shape}")
 
-        # ✅ Cleanup temporary file
-        os.remove(temp_filename)
+        # ✅ **Fix: Reshape to match model input (batch_size=1, time_steps=309, features=1)**
+        y = y.reshape(1, 309, 1)  # **This was missing!**
 
-        return mel_spectrogram_resized
+        print(f"📏 Reshaped Audio for Model: {y.shape}")  # Debugging
+
+        return y
 
     except Exception as e:
         print(f"❌ Error processing audio: {str(e)}")
         return None
+
 
 
 # =========================== Predict Emotion ===========================
@@ -238,11 +234,29 @@ def predict():
         if processed_audio is None:
             return jsonify({"error": "Error processing audio"}), 500
 
-        # ✅ Ensure processed_audio is correctly shaped
+        # ✅ Ensure processed_audio shape matches model input
+        if processed_audio.shape != (1, 309, 1):
+            print(f"❌ Invalid Input Shape! Expected (1, 309, 1) but got {processed_audio.shape}")
+            return jsonify({"error": "Processed audio shape mismatch"}), 500
+
+        # ✅ Predict emotion
         prediction = model.predict(processed_audio)
+
+        # ✅ Debugging: Print model output shape BEFORE argmax
+        print("📊 Model Raw Prediction Output:", prediction)
+        print("📊 Model Prediction Shape:", prediction.shape)
+
+        # ✅ Ensure model output has correct shape
+        if prediction.shape[1] != len(emotions):
+            return jsonify({
+                "error": "Model output shape mismatch!",
+                "expected_shape": (1, len(emotions)),
+                "actual_shape": prediction.shape
+            }), 500
+
         predicted_index = np.argmax(prediction)
 
-        # ✅ Validate predicted_index before accessing emotions[]
+        # ✅ Validate predicted index
         if predicted_index < 0 or predicted_index >= len(emotions):
             return jsonify({
                 "error": "Invalid prediction index!",
@@ -250,13 +264,13 @@ def predict():
                 "prediction": prediction.tolist()
             }), 500
 
-        # Retrieve the predicted emotion
+        # ✅ Retrieve predicted emotion
         predicted_emotion = emotions[predicted_index]
 
-        # Get recommended playlist (fallback to default if not found)
+        # ✅ Get recommended playlist (fallback to default if not found)
         recommended_playlist = emotion_playlists.get(predicted_emotion, "No playlist available")
 
-        # Return prediction results
+        # ✅ Return prediction results
         return jsonify({"emotion": predicted_emotion, "playlist": recommended_playlist})
 
     except Exception as e:
