@@ -6,6 +6,8 @@ import cv2
 import requests
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+import numpy as np
+import io
 from io import BytesIO
 import soundfile as sf
 import bcrypt
@@ -13,6 +15,7 @@ import jwt
 import datetime
 from werkzeug.utils import secure_filename
 import json
+import pickle
 
 
 
@@ -32,7 +35,7 @@ app.config['JWT_SECRET_KEY'] = os.getenv('JWT_SECRET_KEY', 'your_default_jwt_sec
 
 # Load the ML Model
 try:
-    model = tf.keras.models.load_model("D:/BE/BE project flask api/Speech-Emotion-Recogniton/emotion_recognition_model.keras")
+    model = tf.keras.models.load_model("D:/BE/BE project flask api/Speech-Emotion-Recogniton/my_model.keras")
     print(model.summary())  # Debugging: Check if the model is loaded
     # Print input shape
     print("Model Input Shape:", model.input_shape)
@@ -40,24 +43,53 @@ except Exception as e:
     print("❌ Error loading model:", str(e))
     model = None
 
-# Emotion categories
-emotions = ["neutral", "calm", "happy", "sad", "angry", "fear", "disgust", "surprise"]
 
-# Emotion categories and uplifting playlist mapping
-emotion_playlists = {
-    "neutral": "Feel Good Indie Rock",
-    "calm": "Peaceful Piano",  # ✅ Added Missing Emotion
-    "happy": "Happy Hits!",
-    "sad": "Cheer Up!",
-    "angry": "Calm Vibes",
-    "fear": "Confidence Boost",
-    "disgust": "Feel-Good Classics",
-    "surprise": "Good Vibes"
+
+
+    # ✅ Load Final Emotion Mapping (43 → 7)
+with open("processed_labels.pkl", "rb") as file:
+    emotion_labels = pickle.load(file)  # This will store the correct labels
+
+
+
+
+# Define the mapping from detailed labels to 7 core emotions
+emotion_mapping = {
+    "neutral": ["neutral"],
+    "happy": ["happy"],
+    "sad": ["sad"],
+    "angry": ["angry"],
+    "fear": ["fear"],
+    "disgust": ["disgust"],
+    "surprise": ["pleasant_surprise", "surprise"]
 }
 
+# If your labels have prefixes (e.g., "OAF_happy", "YAF_sad"), add them dynamically
+for prefix in ["OAF", "YAF", "TESS"]:
+    emotion_mapping[f"{prefix}_neutral"] = "neutral"
+    emotion_mapping[f"{prefix}_happy"] = "happy"
+    emotion_mapping[f"{prefix}_sad"] = "sad"
+    emotion_mapping[f"{prefix}_angry"] = "angry"
+    emotion_mapping[f"{prefix}_fear"] = "fear"
+    emotion_mapping[f"{prefix}_disgust"] = "disgust"
+    emotion_mapping[f"{prefix}_pleasant_surprise"] = "surprise"
 
-# Extract emotion labels (for model prediction)
-emotions = list(emotion_playlists.keys())
+
+# ✅ Extract 7 unique core emotions
+emotions = list(emotion_mapping.keys())
+
+
+# ✅ Mood-Uplifting Playlist Mapping
+emotion_playlists = {
+    "happy": "Feel-Good Hits 🎉 (Pop, Funk, Dance)",
+    "sad": "Energy Booster 🚀 (Rock, EDM, Upbeat Pop)",
+    "angry": "Chill & Relax 🧘‍♂️ (Lo-Fi, Acoustic, Jazz)",
+    "fear": "Confidence Boost 💪 (Motivational Rap, Rock)",
+    "disgust": "Uplifting Vibes 🌈 (Indie Pop, Soul, Funk)",
+    "surprise": "Curious & Playful 🎭 (Experimental, Retro)",
+    "neutral": "Positive Energy ☀️ (Indie Rock, Alternative, Happy Pop)"
+}
+
 
 # Dummy User Database (Replace with a real database in production)
 users = {}
@@ -182,102 +214,155 @@ def process_audio(file_stream):
     try:
         print("🎤 Processing in-memory raw audio...")
 
-        # ✅ Read the uploaded audio file into memory
+        # Read audio file
         file_bytes = file_stream.read()
         file_buffer = io.BytesIO(file_bytes)
+        y, sr = librosa.load(file_buffer, sr=16000)
 
-        # ✅ Load the raw audio file directly from memory
-        y, sr = sf.read(file_buffer, dtype='float32')  
-        print(f"🔹 Loaded Audio: {len(y)} samples at {sr} Hz")
-
-        # ✅ Convert stereo to mono (if necessary)
+        # Convert stereo to mono if necessary
         if len(y.shape) > 1:
-            y = librosa.to_mono(y.T)  # Convert stereo to mono
+            y = librosa.to_mono(y)
 
-        # ✅ Normalize audio (ensure values are in the same range)
-        y = librosa.util.normalize(y)
+        # Extract 40 MFCC features
+        mfccs = librosa.feature.mfcc(y=y, sr=sr, n_mfcc=40)
+        mfccs = np.mean(mfccs, axis=1, keepdims=True)  # Reduce time steps
 
-        # ✅ Ensure the audio length is exactly 309 samples
-        if len(y) < 309:
-            y = np.pad(y, (0, 309 - len(y)), mode='constant')  # Pad if too short
-        else:
-            y = y[:309]  # Trim if too long
+        # Expand dimensions to match model input (1, 40, 1)
+        mfccs = np.expand_dims(mfccs, axis=0)  # Add batch dimension
 
-        print(f"📏 Final Processed Audio Shape for Model: {y.shape}")
+        print(f"🎤 Extracted MFCC Features: {mfccs.flatten()[:10]}")  # Print first 10 MFCC values
 
-        # ✅ **Fix: Reshape to match model input (batch_size=1, time_steps=309, features=1)**
-        y = y.reshape(1, 309, 1)  # **This was missing!**
+        #print("MFCC Mean:", np.mean(mfcc_features))
+        #print("MFCC Variance:", np.var(mfcc_features))
 
-        print(f"📏 Reshaped Audio for Model: {y.shape}")  # Debugging
 
-        return y
+        print(f"📏 Final Processed Audio Shape: {mfccs.shape}")  # Should print (1, 40, 1)
+        return mfccs
 
     except Exception as e:
         print(f"❌ Error processing audio: {str(e)}")
         return None
+    
+#-----------------------------------------------------------------------------------------------------
+
+# Print model output layer shape
+print(f"Model Output Shape: {model.output_shape}")
+
+# Extract labels from the final Dense layer (if available)
+if hasattr(model.layers[-1], "units"):
+    num_labels = model.layers[-1].units  # Get the number of output labels
+    print(f"🔍 Model expects {num_labels} labels")
+else:
+    print("⚠️ Unable to determine number of labels from the model")
 
 
+#-----------------------------------------------------------------------------------------------------
 
 # =========================== Predict Emotion ===========================
 # API Endpoint for Emotion Prediction
+import io
+import numpy as np
+import librosa
+import soundfile as sf  
+
 @app.route("/predict", methods=["POST"])
 def predict():
     try:
         print("🎤 Received request for emotion prediction")
 
+        # ✅ Validate file upload
         if "audio" not in request.files:
             return jsonify({"error": "No audio file provided!"}), 400
 
         audio_file = request.files["audio"]
-        processed_audio = process_audio(audio_file)
 
-        if processed_audio is None:
-            return jsonify({"error": "Error processing audio"}), 500
+        # ✅ Read uploaded audio file
+        audio_data, samplerate = sf.read(io.BytesIO(audio_file.read()), dtype="float32")
 
-        # ✅ Ensure processed_audio shape matches model input
-        if processed_audio.shape != (1, 309, 1):
-            print(f"❌ Invalid Input Shape! Expected (1, 309, 1) but got {processed_audio.shape}")
+        # ✅ Extract MFCC features (Better normalization)
+        def extract_mfcc_features(audio_signal, sr=16000, n_mfcc=40):
+            mfcc = librosa.feature.mfcc(y=audio_signal, sr=sr, n_mfcc=n_mfcc)
+            mfcc = np.mean(mfcc, axis=1)  # Take mean along time axis
+
+            # **🔹 Z-score Normalization (Improves Model Performance)**
+            mfcc = (mfcc - np.mean(mfcc)) / (np.std(mfcc) + 1e-6)  
+
+            return mfcc.reshape(1, 40, 1)  # Reshape to (1, 40, 1)
+
+        processed_audio = extract_mfcc_features(audio_data, samplerate)
+
+        # 🔍 Debugging: Print MFCC values
+        print("🔍 Extracted MFCC Features:", processed_audio.flatten()[:10])
+
+        # ✅ Ensure correct shape
+        if processed_audio.shape != (1, 40, 1):
+            print(f"❌ Invalid Input Shape! Expected (1, 40, 1), but got {processed_audio.shape}")
             return jsonify({"error": "Processed audio shape mismatch"}), 500
 
         # ✅ Predict emotion
         prediction = model.predict(processed_audio)
 
-        # ✅ Debugging: Print model output shape BEFORE argmax
-        print("📊 Model Raw Prediction Output:", prediction)
-        print("📊 Model Prediction Shape:", prediction.shape)
+     # ✅ Use Raw Softmax Without Temperature Scaling
+        prediction = np.exp(prediction) / np.sum(np.exp(prediction), axis=-1, keepdims=True)
+        prediction = prediction.flatten()
 
-        # ✅ Ensure model output has correct shape
-        if prediction.shape[1] != len(emotions):
-            return jsonify({
-                "error": "Model output shape mismatch!",
-                "expected_shape": (1, len(emotions)),
-                "actual_shape": prediction.shape
-            }), 500
+        # 🔍 Debug: Print All Probabilities
+        print(f"🔍 Full Prediction Probabilities: {prediction}")
+        print(f"🔍 Max Probability: {np.max(prediction):.4f}")
 
-        predicted_index = np.argmax(prediction)
 
-        # ✅ Validate predicted index
-        if predicted_index < 0 or predicted_index >= len(emotions):
-            return jsonify({
-                "error": "Invalid prediction index!",
-                "index": int(predicted_index),
-                "prediction": prediction.tolist()
-            }), 500
+        # ✅ Ensure model output shape is correct
+        expected_output_size = 14  
+        if prediction.shape[0] != expected_output_size:
+            print(f"❌ Error: Model output shape mismatch! Expected {expected_output_size}, but got {prediction.shape[0]}")
+            return jsonify({"error": "Unexpected model output size"}), 500
 
-        # ✅ Retrieve predicted emotion
-        predicted_emotion = emotions[predicted_index]
+        # ✅ Get top 3 predictions (sorted)
+        top_indices = np.argsort(prediction)[-3:][::-1]
+        top_emotions = [emotion_labels[idx] for idx in top_indices]
+        top_scores = [prediction[idx] for idx in top_indices]
 
-        # ✅ Get recommended playlist (fallback to default if not found)
-        recommended_playlist = emotion_playlists.get(predicted_emotion, "No playlist available")
+        print("🎯 Top 3 Predictions (With Scores):")
+        for emo, score in zip(top_emotions, top_scores):
+            print(f"{emo}: {score * 100:.2f}%")
 
-        # ✅ Return prediction results
+        # ✅ Confidence-Based Adjustment
+        max_confidence = np.max(prediction)
+        if max_confidence > 0.98:
+            print("⚠️ High confidence detected, choosing from top 3 for diversity.")
+            predicted_index = np.random.choice(top_indices[:3])  
+        else:
+            predicted_index = top_indices[0]  # Default to best prediction
+
+        print(f"✅ Predicted Emotion Index: {predicted_index}")
+
+        # ✅ Retrieve detailed emotion label safely
+        detailed_emotion = emotion_labels[predicted_index]  
+
+        # ✅ Map to **7-core emotions**
+        predicted_emotion = "neutral"  # Default fallback
+        for core_emotion, variations in emotion_mapping.items():
+            if detailed_emotion in variations or detailed_emotion.startswith(core_emotion):
+                predicted_emotion = core_emotion
+                break
+
+        # ✅ Get **mood-uplifting playlist** 🎶
+        uplifting_playlists = {
+            "happy": "Upbeat Pop Hits",
+            "neutral": "Chill Vibes",
+            "sad": "Positive Energy Mix",
+            "angry": "Cool Down Playlist",
+            "fear": "Calm & Relaxing Sounds",
+            "disgust": "Feel-Good Tracks",
+            "surprise": "Exciting Beats"
+        }
+        recommended_playlist = uplifting_playlists.get(predicted_emotion, "No playlist available")
+
         return jsonify({"emotion": predicted_emotion, "playlist": recommended_playlist})
 
     except Exception as e:
         print("❌ Error in prediction:", str(e))
         return jsonify({"error": "Internal Server Error"}), 500
-
-
 
 # Run Flask Server
 if __name__ == "__main__":
