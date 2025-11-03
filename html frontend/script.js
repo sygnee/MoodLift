@@ -7,14 +7,14 @@ document.addEventListener("DOMContentLoaded", () => {
     const playlistContainer = document.getElementById("playlist-container");
     const toggleDarkMode = document.getElementById("toggle-darkmode");
 
-    // ✅ Declare Global Variables ONCE
-    var mediaRecorder = null;  // 🔹 Use `var` instead of `let` to avoid redeclaration error
+    //  Declare Global Variables ONCE
+    var mediaRecorder = null;  //  Use `var` instead of `let` to avoid redeclaration error
     var audioChunks = [];
-    var stream = null; // 🔹 Keep track of microphone stream
+    var stream = null; //  Keep track of microphone stream
 
     let mediaRecorder = null;
     let audioChunks = [];
-    let stream = null; // 🔹 Added to track mic usage globally
+    let stream = null; //  Added to track mic usage globally
 
     
 
@@ -66,13 +66,13 @@ document.addEventListener("DOMContentLoaded", () => {
             });
     
             const data = await response.json();
-            console.log("🔹 Login Response:", data);
+            console.log(" Login Response:", data);
     
             if (data.error) {
-                alert(`❌ Error: ${data.error}`);
+                alert(` Error: ${data.error}`);
             } else {
                 localStorage.setItem("token", data.token);
-                alert("✅ Login successful!");
+                alert("Login successful!");
                 window.location.href = "index.html";  // Redirect to login page after signup
 
             }
@@ -91,11 +91,11 @@ document.addEventListener("DOMContentLoaded", () => {
             const confirmPassword = document.getElementById("confirm-password").value;
     
             if (password !== confirmPassword) {
-                alert("❌ Passwords do not match!");
+                alert("Passwords do not match!");
                 return;
             }
     
-            console.log("🔹 Sending signup request...");
+            console.log(" Sending signup request...");
     
             const response = await fetch("http://127.0.0.1:5000/signup", {
                 method: "POST",
@@ -104,12 +104,12 @@ document.addEventListener("DOMContentLoaded", () => {
             });
     
             const data = await response.json();
-            console.log("🔹 Signup Response:", data);
+            console.log(" Signup Response:", data);
     
             if (data.error) {
-                alert(`❌ Error: ${data.error}`);
+                alert(`Error: ${data.error}`);
             } else {
-                alert("✅ Account created successfully! Please log in.");
+                alert(" Account created successfully! Please log in.");
                 window.location.href = "index.html";  // Redirect to main login page
 
             }
@@ -121,20 +121,20 @@ document.addEventListener("DOMContentLoaded", () => {
     // Voice Recording and Emotion Detection
     let mediaRecorder;
     let audioChunks = [];
-    let stream; // 🔹 Store mic stream globally so we can stop it properly
+    let stream; //  Store mic stream globally so we can stop it properly
 
     if (recordBtn) {
         recordBtn.addEventListener("click", async () => {
             try {
-                // ✅ If mic is already open, stop it before starting a new one
+                // If mic is already open, stop it before starting a new one
                 if (stream) {
                     stream.getTracks().forEach(track => track.stop());
                 }
     
-                // ✅ Open a new mic stream
+                // Open a new mic stream
                 stream = await navigator.mediaDevices.getUserMedia({ audio: true });
                 mediaRecorder = new MediaRecorder(stream);
-                audioChunks = []; // ✅ Reset audio chunks for new recording
+                audioChunks = []; // Reset audio chunks for new recording
     
                 mediaRecorder.start();
                 recordBtn.disabled = true;
@@ -144,9 +144,9 @@ document.addEventListener("DOMContentLoaded", () => {
                     audioChunks.push(event.data);
                 };
     
-                console.log("🎤 Recording started...");
+                console.log(" Recording started...");
             } catch (error) {
-                alert("❌ Error accessing microphone: " + error.message);
+                alert(" Error accessing microphone: " + error.message);
                 console.error("Mic Error:", error);
             }
         });
@@ -155,7 +155,7 @@ document.addEventListener("DOMContentLoaded", () => {
     if (stopBtn) {
         stopBtn.addEventListener("click", async () => {
             if (!mediaRecorder || mediaRecorder.state !== "recording") {
-                alert("❌ No active recording found.");
+                alert("No active recording found.");
                 return;
             }
     
@@ -164,15 +164,15 @@ document.addEventListener("DOMContentLoaded", () => {
             stopBtn.disabled = true;
     
             mediaRecorder.onstop = async () => {
-                console.log("🎤 Recording stopped");
+                console.log(" Recording stopped");
     
                 if (audioChunks.length === 0) {
-                    alert("❌ No audio recorded. Please try again.");
+                    alert(" No audio recorded. Please try again.");
                     return;
                 }
     
                 const audioBlob = new Blob(audioChunks, { type: "audio/webm" });
-                audioChunks = []; // 🔹 Clear old recordings to avoid conflicts
+                audioChunks = []; //  Clear old recordings to avoid conflicts
     
                 const formData = new FormData();
                 formData.append("audio", audioBlob, "recording.webm");
@@ -184,24 +184,24 @@ document.addEventListener("DOMContentLoaded", () => {
                     });
     
                     const data = await response.json();
-                    console.log("🔹 Emotion Prediction Response:", data);
+                    console.log(" Emotion Prediction Response:", data);
     
                     if (response.ok) {
                         emotionResult.innerHTML = `Detected Emotion: <span>${data.emotion}</span>`;
                         displayMoodBoostingPlaylists(data.emotion);
                     } else {
-                        alert(`❌ Error: ${data.error}`);
+                        alert(` Error: ${data.error}`);
                     }
                 } catch (error) {
-                    alert("❌ Network error. Please check your connection.");
+                    alert(" Network error. Please check your connection.");
                     console.error("Fetch error:", error);
                 }
     
-                // ✅ FIX: Stop microphone access properly
+                // FIX: Stop microphone access properly
                 if (stream) {
                     stream.getTracks().forEach(track => track.stop());
-                    console.log("🎤 Microphone access stopped");
-                    stream = null; // 🔹 Reset stream variable to ensure a fresh one is created next time
+                    console.log(" Microphone access stopped");
+                    stream = null; //  Reset stream variable to ensure a fresh one is created next time
                 }
             };
         });
@@ -248,10 +248,11 @@ document.addEventListener("DOMContentLoaded", () => {
         selectedPlaylists.forEach(playlist => {
             const playlistElement = document.createElement("a");
             playlistElement.href = playlist.url;
-            playlistElement.textContent = `🎵 ${playlist.name}`;
+            playlistElement.textContent = ` ${playlist.name}`;
             playlistElement.target = "_blank";
             playlistElement.classList.add("playlist-item");
             playlistContainer.appendChild(playlistElement);
         });
     }
 });
+
